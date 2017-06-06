@@ -122,6 +122,14 @@ namespace dlib
                   Larger values indicate higher confidence.
         !*/
 
+	template <
+            typename image_type
+            >
+	double update_with_patch(
+            const image_type& img,
+	    point pos	
+        );
+
         template <
             typename image_type
             >
@@ -157,6 +165,5 @@ namespace dlib
 }
 
 #endif // DLIB_CORRELATION_TrACKER_ABSTRACT_H_
-
 
 
