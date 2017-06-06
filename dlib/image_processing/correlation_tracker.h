@@ -172,6 +172,62 @@ namespace dlib
 
             return psr;
         }
+	
+	template <typename image_type>
+        double update_noscale_patch_pos(
+            const image_type& img,
+            const drectangle& guess,
+	    point pp_input		 
+        )
+        {
+            DLIB_CASSERT(get_position().is_empty() == false,
+                "\t double correlation_tracker::update()"
+                << "\n\t You must call start_track() first before calling update()."
+            );
+
+
+            const point_transform_affine tform = make_chip(img, guess, F);
+            for (unsigned long i = 0; i < F.size(); ++i)
+                fft_inplace(F[i]);
+
+            // use the current filter to predict the object's location
+            G = 0;
+            for (unsigned long i = 0; i < F.size(); ++i)
+                G += pointwise_multiply(F[i],conj(A[i]));
+            G = pointwise_multiply(G, reciprocal(B+get_regularizer_space()));
+            ifft_inplace(G);
+            const dlib::vector<double,2> pp = max_point_interpolated(real(G));
+
+
+            // Compute the peak to side lobe ratio.
+            const point p = pp;
+            running_stats<double> rs;
+            const rectangle peak = centered_rect(p, 8,8);
+            for (long r = 0; r < G.nr(); ++r)
+            {
+                for (long c = 0; c < G.nc(); ++c)
+                {
+                    if (!peak.contains(point(c,r)))
+                        rs.add(G(r,c).real());
+                }
+            }
+            const double psr = (G(p.y(),p.x()).real()-rs.mean())/rs.stddev();
+
+            // update the position of the object
+            position = translate_rect(guess, tform(pp)-center(guess));
+
+            // now update the position filters
+            make_target_location_image(pp, G);
+            B *= (1-get_nu_space());
+            for (unsigned long i = 0; i < F.size(); ++i)
+            {
+                A[i] = get_nu_space()*pointwise_multiply(G, F[i]) + (1-get_nu_space())*A[i];
+                B += get_nu_space()*(squared(real(F[i]))+squared(imag(F[i])));
+            }
+
+            return psr;
+        }
+
 
         template <typename image_type>
         double update (
@@ -180,6 +236,44 @@ namespace dlib
         )
         {
             double psr = update_noscale(img, guess);
+
+            // Now predict the scale change
+            make_scale_space(img, Fs);
+            for (unsigned long i = 0; i < Fs.size(); ++i)
+                fft_inplace(Fs[i]);
+            Gs = 0;
+            for (unsigned long i = 0; i < Fs.size(); ++i)
+                Gs += pointwise_multiply(Fs[i],conj(As[i]));
+            Gs = pointwise_multiply(Gs, reciprocal(Bs+get_regularizer_scale()));
+            ifft_inplace(Gs);
+            const double pos = max_point_interpolated(real(Gs)).y();
+
+            // update the rectangle's scale
+            position *= std::pow(get_scale_pyramid_alpha(), pos-(double)get_num_scale_levels()/2);
+
+
+
+            // Now update the scale filters
+            make_scale_target_location_image(pos, Gs);
+            Bs *= (1-get_nu_scale());
+            for (unsigned long i = 0; i < Fs.size(); ++i)
+            {
+                As[i] = get_nu_scale()*pointwise_multiply(Gs, Fs[i]) + (1-get_nu_scale())*As[i];
+                Bs += get_nu_scale()*(squared(real(Fs[i]))+squared(imag(Fs[i])));
+            }
+
+
+            return psr;
+        }
+
+	template <typename image_type>
+        double update_with_patch (
+            const image_type& img,
+ 	    point pp	
+        )
+        {
+            double psr = update_noscale_patch_pos(img, get_position(), pp);
+	    
 
             // Now predict the scale change
             make_scale_space(img, Fs);
@@ -401,4 +495,3 @@ namespace dlib
 }
 
 #endif // DLIB_CORRELATION_TrACKER_H_
-
